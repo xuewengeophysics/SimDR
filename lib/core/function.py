@@ -29,6 +29,7 @@ from utils.transforms import transform_preds
 from utils.vis import save_debug_images
 from core.loss import JointsMSELoss, NMTCritierion
 
+import ipdb
 
 logger = logging.getLogger(__name__)
 
@@ -242,10 +243,15 @@ def train_simdr(config, train_loader, model, criterion, optimizer, epoch,
 
     end = time.time()
     for i, (input, target, target_weight, meta) in enumerate(train_loader):
+        ##input.shape为[B, 3, 64, 64]
+        ##target.shape为[B, 17, 2]
+        ##target_weight.shape为[B, 17, 1]
         # measure data loading time
         data_time.update(time.time() - end)
 
         # compute output
+        ##output_x.shape为[B, 17, 192]
+        ##output_y.shape为[B, 17, 192]
         output_x, output_y = model(input)
 
         target = target.cuda(non_blocking=True).long()
@@ -303,7 +309,13 @@ def validate_simdr(config, val_loader, val_dataset, model, criterion, output_dir
     with torch.no_grad():
         end = time.time()
         for i, (input, target, target_weight, meta) in enumerate(val_loader):
+            ##input.shape为[B, 3, 64, 64]
+            ##target.shape为[B, 17, 2]
+            ##target_weight.shape为[B, 17, 1]
+            ipdb.set_trace()
             # compute output
+            ##output_x.shape为[B, 17, 192]
+            ##output_y.shape为[B, 17, 192]
             output_x, output_y = model(input) # [b,num_keypoints,logits]
             if config.TEST.FLIP_TEST:
                 input_flipped = input.flip(3)
@@ -324,6 +336,9 @@ def validate_simdr(config, val_loader, val_dataset, model, criterion, output_dir
                 output_x = (F.softmax(output_x,dim=2) + F.softmax(output_x_flipped,dim=2))*0.5
                 output_y = (F.softmax(output_y,dim=2) + F.softmax(output_y_flipped,dim=2))*0.5
             else:
+                ##output_x.shape为[B, 17, 192]
+                ##output_y.shape为[B, 17, 192]
+                ##192的含义是cfg.MODEL.IMAGE_SIZE[0]*cfg.MODEL.SIMDR_SPLIT_RATIO=64*3
                 output_x = F.softmax(output_x,dim=2)
                 output_y = F.softmax(output_y,dim=2)
 
@@ -340,10 +355,13 @@ def validate_simdr(config, val_loader, val_dataset, model, criterion, output_dir
             batch_time.update(time.time() - end)
             end = time.time()
 
+            ##c.shape为[B, 2]
             c = meta['center'].numpy()
             s = meta['scale'].numpy()
             score = meta['score'].numpy()
 
+            ##对应文中的公式(5)
+            ##最大概率，最大概率对应的index
             max_val_x, preds_x = output_x.max(2,keepdim=True)
             max_val_y, preds_y = output_y.max(2,keepdim=True)
 

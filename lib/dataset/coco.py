@@ -53,28 +53,46 @@ class COCODataset(JointsDataset):
     '''
     def __init__(self, cfg, root, image_set, is_train, transform=None, coord_representation='heatmap', simdr_split_ratio=1):
         super().__init__(cfg, root, image_set, is_train, transform, coord_representation, simdr_split_ratio)
+		##nms阈值，默认为1
         self.nms_thre = cfg.TEST.NMS_THRE
+        ##默认设置为0
         self.image_thre = cfg.TEST.IMAGE_THRE
+        ##是否使用软nms，默认false
         self.soft_nms = cfg.TEST.SOFT_NMS
+        ##关键点相似度oks阈值
         self.oks_thre = cfg.TEST.OKS_THRE
+        ##关键点可见阈值，默认为0.2
         self.in_vis_thre = cfg.TEST.IN_VIS_THRE
+        ##box文件，该文件主要记录person的box
         self.bbox_file = cfg.TEST.COCO_BBOX_FILE
+        ##是否使用ground truth
         self.use_gt_bbox = cfg.TEST.USE_GT_BBOX
+        ##神经网络输入图像的宽和高
         self.image_width = cfg.MODEL.IMAGE_SIZE[0]
         self.image_height = cfg.MODEL.IMAGE_SIZE[1]
+        ##神经网络输入图像的宽/高比
         self.aspect_ratio = self.image_width * 1.0 / self.image_height
+        ##图像标准化参数
         self.pixel_std = 200
 
+        ##根据annotion文件，加载数据集信息，该处只加载了person关键点的数据
         self.coco = COCO(self._get_ann_file_keypoint())
 
         # deal with class names
+        ##获得数据集中标注的类别，该处只有person一个类
         cats = [cat['name']
                 for cat in self.coco.loadCats(self.coco.getCatIds())]
+
+        ##所有类别前面，加上一个背景类
         self.classes = ['__background__'] + cats
         logger.info('=> classes: {}'.format(self.classes))
+        ##计算包括背景在内所有类别的总数
         self.num_classes = len(self.classes)
+        ##字典，类别名:类别编号
         self._class_to_ind = dict(zip(self.classes, range(self.num_classes)))
+        ##字典，类别标签编号:coco数据类别索引
         self._class_to_coco_ind = dict(zip(cats, self.coco.getCatIds()))
+        ##字典，coco数据类别编号:类别标签索引
         self._coco_ind_to_class_ind = dict(
             [
                 (self._class_to_coco_ind[cls], self._class_to_ind[cls])
@@ -83,18 +101,26 @@ class COCODataset(JointsDataset):
         )
 
         # load image file names
+        ##获得包含person图像的索引
         self.image_set_index = self._load_image_set_index()
+        ##计算总共多少图片
         self.num_images = len(self.image_set_index)
 
         logger.info('=> num_images: {}'.format(self.num_images))
 
+        ##需要检测的关键点个数
         self.num_joints = 17
+        ##人体水平对称关键点的映射
         self.flip_pairs = [[1, 2], [3, 4], [5, 6], [7, 8],
                            [9, 10], [11, 12], [13, 14], [15, 16]]
+        ##父母ids??
         self.parent_ids = None
+
+        ##定义上半身和下半身的关键点
         self.upper_body_ids = (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
         self.lower_body_ids = (11, 12, 13, 14, 15, 16)
 
+        ##分别定义每个关键点的权重
         self.joints_weight = np.array(
             [
                 1., 1., 1., 1., 1., 1., 1., 1.2, 1.2,
@@ -126,16 +152,20 @@ class COCODataset(JointsDataset):
         return image_ids
 
     def _get_db(self):
+        ##如果是进行训练或者self.use_gt_bbox设置为True
         if self.is_train or self.use_gt_bbox:
             # use ground truth bbox
             print("++++++++++++++++++++++++++++++++++++++++++++")
             gt_db = self._load_coco_keypoint_annotations()
+        ##使用目标检测模型
         else:
             # use bbox from detection
+            ##使用来自目标检测结果的box
             print("=======================================")
             gt_db = self._load_coco_person_detection_results()
         return gt_db
 
+    ##加载coco所有数据关键点信息
     def _load_coco_keypoint_annotations(self):
         """ ground truth bbox and keypoints """
         gt_db = []
@@ -145,6 +175,7 @@ class COCODataset(JointsDataset):
 
     def _load_coco_keypoint_annotation_kernal(self, index):
         """
+        根据index，加载单个person的关键点数据信息
         coco ann: [u'segmentation', u'area', u'iscrowd', u'image_id', u'bbox', u'category_id', u'id']
         iscrowd:
             crowd instances are handled by marking their overlaps with all categories to -1
@@ -154,14 +185,19 @@ class COCODataset(JointsDataset):
         :param index: coco image id
         :return: db entry
         """
+        ##获得包含person图片信息
         im_ann = self.coco.loadImgs(index)[0]
+        ##获得图片的大小
         width = im_ann['width']
         height = im_ann['height']
 
+        ##获得包含person图片的标注id
         annIds = self.coco.getAnnIds(imgIds=index, iscrowd=False)
+        ##根据标注id，获得对应的标注信息
         objs = self.coco.loadAnns(annIds)
 
         # sanitize bboxes
+        ##对box进行简单的清理，清除一些不符合逻辑的box
         valid_objs = []
         for obj in objs:
             x, y, w, h = obj['bbox']
@@ -176,14 +212,17 @@ class COCODataset(JointsDataset):
 
         rec = []
         for obj in objs:
+            ##获得物体的类别id，person默认为1；如果不为1，则continue跳过该obj
             cls = self._coco_ind_to_class_ind[obj['category_id']]
             if cls != 1:
                 continue
 
             # ignore objs without keypoints annotation
+            ##如果该obj没有包含keypoints的信息也直接跳过
             if max(obj['keypoints']) == 0:
                 continue
 
+            ##获取人体的关节信息，使用3维表示
             joints_3d = np.zeros((self.num_joints, 3), dtype=np.float)
             joints_3d_vis = np.zeros((self.num_joints, 3), dtype=np.float)
             for ipt in range(self.num_joints):
@@ -197,6 +236,7 @@ class COCODataset(JointsDataset):
                 joints_3d_vis[ipt, 1] = t_vis
                 joints_3d_vis[ipt, 2] = 0
 
+            ##获取box的中心点
             center, scale = self._box2cs(obj['clean_bbox'][:4])
             rec.append({
                 'image': self.image_path_from_index(index),
@@ -285,7 +325,7 @@ class COCODataset(JointsDataset):
                 'joints_3d_vis': joints_3d_vis,
             })
 
-        logger.info('=> Total boxes after fliter low score@{}: {}'.format(
+        logger.info('=> Total boxes after filter low score@{}: {}'.format(
             self.image_thre, num_boxes))
         return kpt_db
 

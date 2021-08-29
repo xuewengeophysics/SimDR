@@ -18,6 +18,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
 
+import ipdb
 
 class KLDiscretLoss(nn.Module):
     def __init__(self):
@@ -135,14 +136,22 @@ class NMTCritierion(nn.Module):
         return loss
 
     def forward(self, output_x, output_y, target, target_weight):
+        ##output_x.shape为[B, 17, 192]
+        ##output_y.shape为[B, 17, 192]
+        ##target.shape为[B, 17, 2]
+        ##target_weight.shape为[B, 17, 1]
         batch_size = output_x.size(0)
         num_joints = output_x.size(1)
         loss = 0
 
         for idx in range(num_joints):
+            ##coord_x_pred.shape为[B, 192]
             coord_x_pred = output_x[:,idx].squeeze()
+            ##coord_y_pred.shape为[B, 192]
             coord_y_pred = output_y[:,idx].squeeze()
+            ##coord_gt.shape为[B, 2]
             coord_gt = target[:,idx].squeeze()
+            ##weight是[B]
             weight = target_weight[:,idx].squeeze()
             loss += self.criterion(coord_x_pred,coord_gt[:,0]).mul(weight).sum()
             loss += self.criterion(coord_y_pred,coord_gt[:,1]).mul(weight).sum()
